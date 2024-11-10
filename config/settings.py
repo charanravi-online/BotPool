@@ -32,4 +32,9 @@ MEDIA_FOLDER = 'data/media'
 
 # Logging
 LOG_FILE = 'twitter_bot.log'
-LOG_LEVEL = 'INFO' 
+LOG_LEVEL = 'INFO'
+
+# Rate limiting settings
+CHECK_INTERVAL = 180  # seconds between mention checks
+MAX_RESULTS_PER_REQUEST = 10
+MENTION_PROCESS_DELAY = 2  # seconds between processing each mention

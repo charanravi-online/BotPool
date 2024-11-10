@@ -1,7 +1,7 @@
 import tweepy
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from config.settings import *
 from src.utils.logger import setup_logger
 
@@ -48,27 +48,51 @@ class TwitterBot:
             user_id = user.id
             self.logger.info(f"Bot user ID: {user_id}")
             
-            # Initialize last_mention_id
+            # Initialize last_mention_id and last_check_time
             last_mention_id = None
+            last_check_time = datetime.now()
+            check_interval = 180  # Check every 3 minutes instead of every minute
             
             while True:
                 try:
-                    # Get mentions using v2 endpoint
-                    self.logger.info("Checking for mentions...")
-                    mentions = self.client.get_users_mentions(
-                        id=user_id,
-                        since_id=last_mention_id,
-                        tweet_fields=['text', 'author_id', 'conversation_id'],
-                        user_fields=['username'],
-                        expansions=['author_id']
-                    )
+                    current_time = datetime.now()
+                    # Only check if enough time has passed
+                    if (current_time - last_check_time).seconds >= check_interval:
+                        self.logger.info("Checking for mentions...")
+                        
+                        # Get mentions using v2 endpoint with pagination
+                        mentions = self.client.get_users_mentions(
+                            id=user_id,
+                            since_id=last_mention_id,
+                            tweet_fields=['text', 'author_id', 'conversation_id'],
+                            user_fields=['username'],
+                            expansions=['author_id'],
+                            max_results=10  # Limit results per request
+                        )
+                        
+                        if mentions.data:
+                            for mention in mentions.data:
+                                self.logger.info(f"Found mention: {mention.text}")
+                                last_mention_id = mention.id
+                                # Add a small delay between processing each mention
+                                time.sleep(2)
+                        
+                        last_check_time = current_time
+                        self.logger.info(f"Next check in {check_interval} seconds")
                     
-                    if mentions.data:
-                        for mention in mentions.data:
-                            self.logger.info(f"Found mention: {mention.text}")
-                            last_mention_id = mention.id
+                    # Sleep for a shorter interval to be more responsive
+                    time.sleep(10)
                     
-                    time.sleep(60)  # Check every minute
+                except tweepy.errors.TooManyRequests as e:
+                    # Handle rate limit explicitly
+                    reset_time = int(e.response.headers.get('x-rate-limit-reset', 0))
+                    wait_time = max(reset_time - time.time(), 0)
+                    self.logger.warning(f"Rate limit reached. Waiting {int(wait_time)} seconds")
+                    time.sleep(wait_time + 1)
+                    
+                except tweepy.errors.TwitterServerError as e:
+                    self.logger.error(f"Twitter server error: {str(e)}")
+                    time.sleep(60)
                     
                 except Exception as e:
                     self.logger.error(f"Error processing mentions: {str(e)}")
@@ -77,3 +101,21 @@ class TwitterBot:
         except Exception as e:
             self.logger.error(f"Fatal error: {str(e)}")
             raise
+
+    def get_rate_limit_status(self):
+        """Get current rate limit status"""
+        try:
+            # Get rate limit status for mentions endpoint
+            response = self.client.rate_limit_status()
+            mentions_limit = response['resources']['mentions']['/mentions/timeline']
+            
+            self.logger.info(f"Rate Limit Status:")
+            self.logger.info(f"Remaining: {mentions_limit['remaining']}")
+            self.logger.info(f"Limit: {mentions_limit['limit']}")
+            self.logger.info(f"Reset Time: {datetime.fromtimestamp(mentions_limit['reset'])}")
+            
+            return mentions_limit
+            
+        except Exception as e:
+            self.logger.error(f"Error getting rate limit status: {str(e)}")
+            return None
